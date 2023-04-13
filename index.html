@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <title></title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="css/style.css" rel="stylesheet">
+</head>
+<style>
+  body {
+    background-color: #000;
+    color: #f79a32;
+  }
+</style>
+
+<body>
+  <div class="container">
+    <input type="file" name="" id="uploadinput">
+  </div>
+  <script type="module">
+    import { nanoid } from 'https://cdn.jsdelivr.net/npm/nanoid/nanoid.js'
+    const fileUuid = nanoid()
+    async function uploadFile(file) {
+      const chunkSize = 1024 * 1024 * 5; // 1 MB
+      const totalChunks = Math.ceil(file.size / chunkSize);
+      let uploadedChunks = 0;
+
+      async function* fileChunkGenerator() {
+        for (let i = 0; i < totalChunks; i++) {
+          const start = i * chunkSize;
+          const end = start + chunkSize;
+          const chunk = file.slice(start, end);
+          yield chunk;
+        }
+      }
+
+      async function onUploadProgress() {
+        uploadedChunks++;
+        const progress = (uploadedChunks / totalChunks) * 100;
+        console.log(`Upload progress: ${progress.toFixed(2)}%`);
+      }
+
+      for await (const chunk of fileChunkGenerator()) {
+        const formData = new FormData();
+        formData.append('file', chunk, file.name);
+        formData.append('uuid', fileUuid)
+        formData.append('chunkIndex', uploadedChunks);
+        formData.append('totalChunks', totalChunks);
+        console.log(uploadedChunks, chunk);
+        const response = await fetch('http://localhost:4004/upload', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!response.ok) {
+          throw new Error(`Upload failed with status ${response.status}`);
+        }
+
+        await onUploadProgress();
+      }
+
+      console.log('Upload complete');
+    }
+
+    // Usage:
+    const input = document.querySelector('input[type="file"]');
+    input.addEventListener('change', async (event) => {
+      const file = event.target.files[0];
+      try {
+        await uploadFile(file);
+        console.log('Upload successful');
+      } catch (error) {
+        console.error('Upload failed:', error.message);
+      }
+    });
+  </script>
+</body>
+
+</html>
