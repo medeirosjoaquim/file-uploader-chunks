@@ -1,4 +1,3 @@
-
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
@@ -23,9 +22,9 @@ app.post('/upload', upload.single('file'), async (req, res) => {
   }
 
   const { chunkIndex, totalChunks, uuid } = req.body;
-  const chunkFolder = path.join('./uploads', uuid + req.file.originalname);
-  const chunkFilename = `${chunkIndex}.part`;
-  const chunkFilePath = path.join(chunkFolder, chunkFilename);
+  const chunkFolder = path.resolve('./uploads', uuid + req.file.originalname);
+  const chunkFilename = `${uuid}_${chunkIndex}.part`;
+  const chunkFilePath = path.resolve(chunkFolder, chunkFilename);
   if (!fs.existsSync(chunkFolder)) {
     fs.mkdirSync(chunkFolder, { recursive: true });
   }
@@ -33,31 +32,44 @@ app.post('/upload', upload.single('file'), async (req, res) => {
   fs.writeFileSync(chunkFilePath, req.file.buffer);
 
   if (parseInt(chunkIndex, 10) === parseInt(totalChunks, 10) - 1) {
-    const outputFile = path.join('uploads', `${req.file.originalname}.complete`);
+
+    const outputFile = path.resolve('uploads', `${req.file.originalname}`);
     const writeStream = fs.createWriteStream(outputFile);
 
     const onFinish = new Promise((resolve) => {
       writeStream.on('finish', () => {
-        fs.rmSync(chunkFolder, { recursive: true, force: true });
-
-        res.status(200).json({ message: 'File uploaded and reassembled successfully' });
-        resolve();
+        resolve(true);
       });
     });
 
+    const filesToDelete = [];
+
     try {
       for (let i = 0; i < totalChunks; i++) {
-        const currentChunkFile = path.join(chunkFolder, `${i}.part`);
-        const readStream = fs.createReadStream(currentChunkFile);
-        await pipeline(readStream, writeStream);
-        fs.unlinkSync(currentChunkFile);
+        const currentChunkFile = path.resolve(chunkFolder, `${uuid}_${i}.part`);
+        if (fs.existsSync(currentChunkFile)) {
+          const readStream = fs.createReadStream(currentChunkFile);
+          await pipeline(readStream, writeStream, { end: false });
+          filesToDelete.push(currentChunkFile);
+        }
       }
       writeStream.end();
-      await onFinish;
+      const isFinished = await onFinish;
+      if (isFinished) {
+        filesToDelete.forEach((file) => {
+          if (fs.existsSync(file)) {
+            fs.unlinkSync(file);
+          }
+        });
+        fs.rmSync(chunkFolder, { recursive: true, force: true });
+        res.status(200).json({ message: 'File uploaded and reassembled successfully' });
+      } else {
+        console.log('Error reassembling the file')
+        res.status(500).json({ error: 'Error reassembling the file' });
+      }
     } catch (error) {
       res.status(500).json({ error: 'Error reassembling the file' });
-      console.log(error)
-      // res.end();
+      console.log(error);
     } finally {
       if (!writeStream.destroyed) {
         writeStream.end();
@@ -65,9 +77,9 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     }
   } else {
     res.status(200).json({ message: 'Chunk uploaded successfully' });
-    // res.end();
   }
 });
+
 // Start the server
 const port = process.env.PORT || 4004;
 app.listen(port, () => {
