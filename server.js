@@ -15,24 +15,37 @@ const app = express();
 // Enable CORS
 app.use(cors());
 
-// Set up the upload endpoint
+// New endpoint to get the list of successfully uploaded chunks
+app.get('/uploaded_chunks/:hash/:filename', (req, res) => {
+  const { hash, filename } = req.params;
+  const chunkFolder = path.resolve('./uploads', hash + filename);
+
+  if (!fs.existsSync(chunkFolder)) {
+    return res.status(404).json({ error: 'No chunks found for the specified file' });
+  }
+
+  const chunkFiles = fs.readdirSync(chunkFolder);
+  const uploadedChunks = chunkFiles.map((file) => parseInt(file.split('_')[1].split('.')[0], 10));
+
+  res.status(200).json({ uploadedChunks });
+});
+
+// Modify the existing upload endpoint to handle resumable uploads
 app.post('/upload', upload.single('file'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file was uploaded' });
   }
 
-  const { chunkIndex, totalChunks, uuid } = req.body;
-  const chunkFolder = path.resolve('./uploads', uuid + req.file.originalname);
-  const chunkFilename = `${uuid}_${chunkIndex}.part`;
+  const { chunkIndex, totalChunks, hash } = req.body;
+  const chunkFolder = path.resolve('./uploads', hash + req.file.originalname);
+  const chunkFilename = `${hash}_${chunkIndex}.part`;
   const chunkFilePath = path.resolve(chunkFolder, chunkFilename);
   if (!fs.existsSync(chunkFolder)) {
     fs.mkdirSync(chunkFolder, { recursive: true });
   }
-
   fs.writeFileSync(chunkFilePath, req.file.buffer);
 
   if (parseInt(chunkIndex, 10) === parseInt(totalChunks, 10) - 1) {
-
     const outputFile = path.resolve('uploads', `${req.file.originalname}`);
     const writeStream = fs.createWriteStream(outputFile);
 
@@ -46,7 +59,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
 
     try {
       for (let i = 0; i < totalChunks; i++) {
-        const currentChunkFile = path.resolve(chunkFolder, `${uuid}_${i}.part`);
+        const currentChunkFile = path.resolve(chunkFolder, `${hash}_${i}.part`);
         if (fs.existsSync(currentChunkFile)) {
           const readStream = fs.createReadStream(currentChunkFile);
           await pipeline(readStream, writeStream, { end: false });
@@ -64,7 +77,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
         fs.rmSync(chunkFolder, { recursive: true, force: true });
         res.status(200).json({ message: 'File uploaded and reassembled successfully' });
       } else {
-        console.log('Error reassembling the file')
+        console.log('Error reassembling the file');
         res.status(500).json({ error: 'Error reassembling the file' });
       }
     } catch (error) {

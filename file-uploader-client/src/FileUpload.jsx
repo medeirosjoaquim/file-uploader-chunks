@@ -9,7 +9,6 @@ const FileUpload = () => {
     const worker = new Worker('./uploadWorker.js');
 
     worker.addEventListener('message', (event) => {
-      console.log(event)
       if (event.data.progress) {
         setProgress(event.data.progress);
       }
